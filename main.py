@@ -2,6 +2,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import date
+import sqlite3
 
 
 class ExpenseTracker:
@@ -12,12 +13,28 @@ class ExpenseTracker:
         self.root.minsize(800, 550)
         self.root.configure(bg="#111827")
 
-        self.transactions = []
+        self.db_connection = sqlite3.connect("expenses.db")
+        self.cursor = self.db_connection.cursor()
 
+        self.create_database()
         self.create_ui()
+        self.load_transactions()
+
+    def create_database(self):
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL,
+                description TEXT
+            )
+        """)
+
+        self.db_connection.commit()
 
     def create_ui(self):
-        # Header
         header = tk.Frame(self.root, bg="#111827")
         header.pack(fill="x", padx=25, pady=20)
 
@@ -44,9 +61,11 @@ class ExpenseTracker:
         self.income_label = self.create_card(
             summary, "TOTAL INCOME", "₹0", "#22C55E"
         )
+
         self.expense_label = self.create_card(
             summary, "TOTAL EXPENSE", "₹0", "#EF4444"
         )
+
         self.balance_label = self.create_card(
             summary, "BALANCE", "₹0", "#38BDF8"
         )
@@ -69,25 +88,29 @@ class ExpenseTracker:
         self.note_var = tk.StringVar()
         self.date_var = tk.StringVar(value=date.today().isoformat())
 
-        # First row
         tk.Label(
-            form, text="Type", bg="#1F2937", fg="white"
+            form,
+            text="Type",
+            bg="#1F2937",
+            fg="white"
         ).grid(row=0, column=0, sticky="w", padx=8, pady=5)
 
-        type_box = ttk.Combobox(
+        ttk.Combobox(
             form,
             textvariable=self.type_var,
             values=["Income", "Expense"],
             state="readonly",
             width=15
-        )
-        type_box.grid(row=1, column=0, padx=8, pady=5)
+        ).grid(row=1, column=0, padx=8, pady=5)
 
         tk.Label(
-            form, text="Category", bg="#1F2937", fg="white"
+            form,
+            text="Category",
+            bg="#1F2937",
+            fg="white"
         ).grid(row=0, column=1, sticky="w", padx=8, pady=5)
 
-        self.category_box = ttk.Combobox(
+        ttk.Combobox(
             form,
             textvariable=self.category_var,
             values=[
@@ -96,11 +119,13 @@ class ExpenseTracker:
                 "Business", "Other"
             ],
             width=18
-        )
-        self.category_box.grid(row=1, column=1, padx=8, pady=5)
+        ).grid(row=1, column=1, padx=8, pady=5)
 
         tk.Label(
-            form, text="Amount (₹)", bg="#1F2937", fg="white"
+            form,
+            text="Amount (₹)",
+            bg="#1F2937",
+            fg="white"
         ).grid(row=0, column=2, sticky="w", padx=8, pady=5)
 
         tk.Entry(
@@ -109,10 +134,11 @@ class ExpenseTracker:
             width=17
         ).grid(row=1, column=2, padx=8, pady=5)
 
-        # Second row
         tk.Label(
-            form, text="Date (YYYY-MM-DD)",
-            bg="#1F2937", fg="white"
+            form,
+            text="Date (YYYY-MM-DD)",
+            bg="#1F2937",
+            fg="white"
         ).grid(row=2, column=0, sticky="w", padx=8, pady=8)
 
         tk.Entry(
@@ -122,8 +148,10 @@ class ExpenseTracker:
         ).grid(row=3, column=0, padx=8, pady=5)
 
         tk.Label(
-            form, text="Description",
-            bg="#1F2937", fg="white"
+            form,
+            text="Description",
+            bg="#1F2937",
+            fg="white"
         ).grid(row=2, column=1, sticky="w", padx=8, pady=8)
 
         tk.Entry(
@@ -131,8 +159,12 @@ class ExpenseTracker:
             textvariable=self.note_var,
             width=40
         ).grid(
-            row=3, column=1, columnspan=2,
-            sticky="w", padx=8, pady=5
+            row=3,
+            column=1,
+            columnspan=2,
+            sticky="w",
+            padx=8,
+            pady=5
         )
 
         tk.Button(
@@ -194,7 +226,10 @@ class ExpenseTracker:
         }
 
         for column in columns:
-            self.table.heading(column, text=headings[column])
+            self.table.heading(
+                column,
+                text=headings[column]
+            )
             self.table.column(
                 column,
                 width=widths[column],
@@ -203,7 +238,6 @@ class ExpenseTracker:
 
         self.table.pack(fill="both", expand=True)
 
-        # Table styling
         style = ttk.Style()
         style.theme_use("clam")
 
@@ -228,14 +262,30 @@ class ExpenseTracker:
             background=[("selected", "#2563EB")]
         )
 
+        # Delete button
+        tk.Button(
+            table_frame,
+            text="DELETE SELECTED TRANSACTION",
+            command=self.delete_transaction,
+            bg="#DC2626",
+            fg="white",
+            activebackground="#B91C1C",
+            relief="flat",
+            font=("Arial", 9, "bold"),
+            padx=12,
+            pady=8
+        ).pack(anchor="e", pady=8)
+
         self.status_label = tk.Label(
             self.root,
-            text="Ready | No transactions added",
+            text="Ready | Database connected",
             bg="#111827",
             fg="#9CA3AF",
             font=("Arial", 9)
         )
         self.status_label.pack(pady=8)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.close_app)
 
     def create_card(self, parent, title, value, color):
         card = tk.Frame(
@@ -244,6 +294,7 @@ class ExpenseTracker:
             padx=20,
             pady=15
         )
+
         card.pack(
             side="left",
             fill="x",
@@ -266,6 +317,7 @@ class ExpenseTracker:
             bg="#1F2937",
             fg=color
         )
+
         label.pack(anchor="w", pady=5)
 
         return label
@@ -299,50 +351,79 @@ class ExpenseTracker:
             )
             return
 
-        transaction = {
-            "date": transaction_date,
-            "type": transaction_type,
-            "category": category,
-            "amount": amount,
-            "description": description
-        }
-
-        self.transactions.append(transaction)
-
-        self.table.insert(
-            "",
-            "end",
-            values=(
+        try:
+            self.cursor.execute("""
+                INSERT INTO transactions
+                (date, type, category, amount, description)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
                 transaction_date,
                 transaction_type,
                 category,
-                f"₹{amount:,.2f}",
+                amount,
                 description
+            ))
+
+            self.db_connection.commit()
+
+            self.load_transactions()
+
+            self.amount_var.set("")
+            self.note_var.set("")
+
+            self.status_label.config(
+                text="Transaction saved successfully!"
             )
-        )
+
+        except sqlite3.Error as error:
+            messagebox.showerror(
+                "Database Error",
+                str(error)
+            )
+
+    def load_transactions(self):
+        self.cursor.execute("""
+            SELECT id, date, type, category, amount, description
+            FROM transactions
+            ORDER BY date DESC, id DESC
+        """)
+
+        records = self.cursor.fetchall()
+
+        for item in self.table.get_children():
+            self.table.delete(item)
+
+        for record in records:
+            transaction_id, transaction_date, transaction_type, category, amount, description = record
+
+            self.table.insert(
+                "",
+                "end",
+                iid=str(transaction_id),
+                values=(
+                    transaction_date,
+                    transaction_type,
+                    category,
+                    f"₹{amount:,.2f}",
+                    description or ""
+                )
+            )
 
         self.update_summary()
 
-        self.amount_var.set("")
-        self.note_var.set("")
-
-        self.status_label.config(
-            text=f"Transaction added successfully | {len(self.transactions)} total"
-        )
-
     def update_summary(self):
-        total_income = sum(
-            item["amount"]
-            for item in self.transactions
-            if item["type"] == "Income"
-        )
+        self.cursor.execute("""
+            SELECT
+                COALESCE(SUM(
+                    CASE WHEN type = 'Income' THEN amount ELSE 0 END
+                ), 0),
+                COALESCE(SUM(
+                    CASE WHEN type = 'Expense' THEN amount ELSE 0 END
+                ), 0)
+            FROM transactions
+        """)
 
-        total_expense = sum(
-            item["amount"]
-            for item in self.transactions
-            if item["type"] == "Expense"
-        )
-
+        total_income, total_expense = self.cursor.fetchone()
         balance = total_income - total_expense
 
         self.income_label.config(
@@ -356,6 +437,50 @@ class ExpenseTracker:
         self.balance_label.config(
             text=f"₹{balance:,.2f}"
         )
+
+    def delete_transaction(self):
+        selected = self.table.selection()
+
+        if not selected:
+            messagebox.showwarning(
+                "Select Transaction",
+                "Please select a transaction to delete."
+            )
+            return
+
+        confirm = messagebox.askyesno(
+            "Confirm Delete",
+            "Are you sure you want to delete this transaction?"
+        )
+
+        if not confirm:
+            return
+
+        try:
+            transaction_id = int(selected[0])
+
+            self.cursor.execute(
+                "DELETE FROM transactions WHERE id = ?",
+                (transaction_id,)
+            )
+
+            self.db_connection.commit()
+
+            self.load_transactions()
+
+            self.status_label.config(
+                text="Transaction deleted successfully!"
+            )
+
+        except (sqlite3.Error, ValueError) as error:
+            messagebox.showerror(
+                "Delete Error",
+                str(error)
+            )
+
+    def close_app(self):
+        self.db_connection.close()
+        self.root.destroy()
 
 
 if __name__ == "__main__":
