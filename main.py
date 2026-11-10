@@ -1,24 +1,45 @@
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from datetime import date, datetime
 import sqlite3
+from datetime import datetime
+import calendar
+
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+
+DB_NAME = "expenses.db"
+
+CATEGORIES = [
+    "Food",
+    "Transport",
+    "Shopping",
+    "Bills",
+    "Entertainment",
+    "Salary",
+    "Business",
+    "Other"
+]
 
 
 class ExpenseTracker:
     def __init__(self, root):
         self.root = root
         self.root.title("Personal Expense Tracker")
-        self.root.geometry("1050x800")
-        self.root.minsize(900, 700)
-        self.root.configure(bg="#111827")
+        self.root.geometry("1100x850")
+        self.root.minsize(950, 700)
 
-        self.db_connection = sqlite3.connect("expenses.db")
-        self.cursor = self.db_connection.cursor()
+        self.conn = sqlite3.connect(DB_NAME)
+        self.cursor = self.conn.cursor()
 
         self.create_database()
-        self.create_ui()
+        self.setup_style()
+        self.create_widgets()
         self.load_transactions()
+        self.update_summary()
+        self.update_monthly_summary()
 
         self.root.protocol("WM_DELETE_WINDOW", self.close_app)
 
@@ -33,565 +54,396 @@ class ExpenseTracker:
                 description TEXT
             )
         """)
-        self.db_connection.commit()
+        self.conn.commit()
 
-    # ---------------- USER INTERFACE ----------------
+    def setup_style(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("Treeview", rowheight=27)
+        style.configure("Treeview.Heading", font=("Arial", 10, "bold"))
+        style.configure("TButton", padding=6)
 
-    def create_ui(self):
-        header = tk.Frame(self.root, bg="#111827")
-        header.pack(fill="x", padx=25, pady=15)
-
-        tk.Label(
-            header,
-            text="EXPENSE TRACKER",
-            font=("Arial", 24, "bold"),
-            bg="#111827",
-            fg="#38BDF8"
-        ).pack(side="left")
-
-        tk.Label(
-            header,
-            text="Manage your money smartly",
-            font=("Arial", 10),
-            bg="#111827",
-            fg="#9CA3AF"
-        ).pack(side="right", pady=10)
+    def create_widgets(self):
+        title = tk.Label(
+            self.root,
+            text="PERSONAL EXPENSE TRACKER",
+            font=("Arial", 21, "bold")
+        )
+        title.pack(pady=12)
 
         # Overall summary cards
-        summary = tk.Frame(self.root, bg="#111827")
-        summary.pack(fill="x", padx=25, pady=8)
+        summary_frame = tk.Frame(self.root)
+        summary_frame.pack(fill="x", padx=20, pady=5)
 
         self.income_label = self.create_card(
-            summary, "TOTAL INCOME", "₹0", "#22C55E"
+            summary_frame, "TOTAL INCOME", "0.00"
         )
-
         self.expense_label = self.create_card(
-            summary, "TOTAL EXPENSE", "₹0", "#EF4444"
+            summary_frame, "TOTAL EXPENSE", "0.00"
         )
-
         self.balance_label = self.create_card(
-            summary, "TOTAL BALANCE", "₹0", "#38BDF8"
+            summary_frame, "BALANCE", "0.00"
         )
 
         # Transaction form
         form = tk.LabelFrame(
             self.root,
-            text="  ADD TRANSACTION  ",
-            font=("Arial", 11, "bold"),
-            bg="#1F2937",
-            fg="#38BDF8",
-            padx=15,
-            pady=12
+            text="Add New Transaction",
+            padx=12,
+            pady=10
         )
-        form.pack(fill="x", padx=25, pady=10)
+        form.pack(fill="x", padx=20, pady=8)
 
+        tk.Label(form, text="Type").grid(row=0, column=0, padx=5, pady=5)
         self.type_var = tk.StringVar(value="Expense")
-        self.category_var = tk.StringVar(value="Food")
-        self.amount_var = tk.StringVar()
-        self.note_var = tk.StringVar()
-        self.date_var = tk.StringVar(value=date.today().isoformat())
-
-        tk.Label(
-            form, text="Type", bg="#1F2937", fg="white"
-        ).grid(row=0, column=0, sticky="w", padx=8, pady=4)
-
         ttk.Combobox(
             form,
             textvariable=self.type_var,
             values=["Income", "Expense"],
             state="readonly",
             width=15
-        ).grid(row=1, column=0, padx=8, pady=4)
+        ).grid(row=0, column=1, padx=5, pady=5)
 
-        tk.Label(
-            form, text="Category", bg="#1F2937", fg="white"
-        ).grid(row=0, column=1, sticky="w", padx=8, pady=4)
-
+        tk.Label(form, text="Category").grid(row=0, column=2, padx=5)
+        self.category_var = tk.StringVar(value="Food")
         ttk.Combobox(
             form,
             textvariable=self.category_var,
-            values=[
-                "Food", "Transport", "Shopping",
-                "Bills", "Entertainment", "Salary",
-                "Business", "Other"
-            ],
-            width=18
-        ).grid(row=1, column=1, padx=8, pady=4)
+            values=CATEGORIES,
+            state="readonly",
+            width=15
+        ).grid(row=0, column=3, padx=5, pady=5)
 
-        tk.Label(
-            form, text="Amount (₹)", bg="#1F2937", fg="white"
-        ).grid(row=0, column=2, sticky="w", padx=8, pady=4)
+        tk.Label(form, text="Amount").grid(row=0, column=4, padx=5)
+        self.amount_entry = ttk.Entry(form, width=16)
+        self.amount_entry.grid(row=0, column=5, padx=5, pady=5)
 
-        tk.Entry(
-            form,
-            textvariable=self.amount_var,
-            width=17
-        ).grid(row=1, column=2, padx=8, pady=4)
+        tk.Label(form, text="Date (YYYY-MM-DD)").grid(
+            row=1, column=0, padx=5, pady=5
+        )
+        self.date_entry = ttk.Entry(form, width=18)
+        self.date_entry.insert(0, datetime.today().strftime("%Y-%m-%d"))
+        self.date_entry.grid(row=1, column=1, padx=5, pady=5)
 
-        tk.Label(
-            form,
-            text="Date (YYYY-MM-DD)",
-            bg="#1F2937",
-            fg="white"
-        ).grid(row=2, column=0, sticky="w", padx=8, pady=6)
-
-        tk.Entry(
-            form,
-            textvariable=self.date_var,
-            width=18
-        ).grid(row=3, column=0, padx=8, pady=4)
-
-        tk.Label(
-            form,
-            text="Description",
-            bg="#1F2937",
-            fg="white"
-        ).grid(row=2, column=1, sticky="w", padx=8, pady=6)
-
-        tk.Entry(
-            form,
-            textvariable=self.note_var,
-            width=40
-        ).grid(
-            row=3,
-            column=1,
-            columnspan=2,
-            sticky="w",
-            padx=8,
-            pady=4
+        tk.Label(form, text="Description").grid(
+            row=1, column=2, padx=5
+        )
+        self.description_entry = ttk.Entry(form, width=35)
+        self.description_entry.grid(
+            row=1, column=3, columnspan=2, padx=5, pady=5
         )
 
-        tk.Button(
+        ttk.Button(
             form,
-            text="+ ADD TRANSACTION",
-            command=self.add_transaction,
-            bg="#2563EB",
-            fg="white",
-            activebackground="#1D4ED8",
-            relief="flat",
-            font=("Arial", 10, "bold"),
-            padx=15,
-            pady=8
-        ).grid(row=1, column=3, rowspan=3, padx=15)
+            text="Add Transaction",
+            command=self.add_transaction
+        ).grid(row=1, column=5, padx=5, pady=5)
 
-        # Filter section
+        # Filters
         filter_frame = tk.LabelFrame(
             self.root,
-            text="  FILTER TRANSACTIONS  ",
-            font=("Arial", 10, "bold"),
-            bg="#1F2937",
-            fg="#38BDF8",
-            padx=12,
-            pady=10
+            text="Transaction Filters",
+            padx=10,
+            pady=8
         )
-        filter_frame.pack(fill="x", padx=25, pady=8)
+        filter_frame.pack(fill="x", padx=20, pady=5)
+
+        tk.Label(filter_frame, text="Category:").pack(side="left", padx=5)
 
         self.filter_category = tk.StringVar(value="All")
-        self.filter_type = tk.StringVar(value="All")
-        self.filter_month = tk.StringVar(
-            value=date.today().strftime("%Y-%m")
-        )
-
-        tk.Label(
-            filter_frame,
-            text="Category",
-            bg="#1F2937",
-            fg="white"
-        ).grid(row=0, column=0, padx=6, sticky="w")
-
         ttk.Combobox(
             filter_frame,
             textvariable=self.filter_category,
-            values=[
-                "All", "Food", "Transport", "Shopping",
-                "Bills", "Entertainment", "Salary",
-                "Business", "Other"
-            ],
+            values=["All"] + CATEGORIES,
             state="readonly",
             width=15
-        ).grid(row=1, column=0, padx=6, pady=5)
+        ).pack(side="left", padx=5)
 
-        tk.Label(
-            filter_frame,
-            text="Transaction Type",
-            bg="#1F2937",
-            fg="white"
-        ).grid(row=0, column=1, padx=6, sticky="w")
+        tk.Label(filter_frame, text="Type:").pack(side="left", padx=5)
 
+        self.filter_type = tk.StringVar(value="All")
         ttk.Combobox(
             filter_frame,
             textvariable=self.filter_type,
             values=["All", "Income", "Expense"],
             state="readonly",
-            width=14
-        ).grid(row=1, column=1, padx=6, pady=5)
+            width=12
+        ).pack(side="left", padx=5)
 
-        tk.Label(
-            filter_frame,
-            text="Month (YYYY-MM)",
-            bg="#1F2937",
-            fg="white"
-        ).grid(row=0, column=2, padx=6, sticky="w")
+        tk.Label(filter_frame, text="Month (YYYY-MM):").pack(
+            side="left", padx=5
+        )
 
-        tk.Entry(
-            filter_frame,
-            textvariable=self.filter_month,
-            width=15
-        ).grid(row=1, column=2, padx=6, pady=5)
+        self.month_filter = ttk.Entry(filter_frame, width=12)
+        self.month_filter.pack(side="left", padx=5)
 
-        tk.Button(
+        ttk.Button(
             filter_frame,
-            text="APPLY FILTER",
-            command=self.apply_filters,
-            bg="#2563EB",
-            fg="white",
-            relief="flat",
-            padx=12,
-            pady=7
-        ).grid(row=1, column=3, padx=8)
+            text="Apply",
+            command=self.apply_filters
+        ).pack(side="left", padx=5)
 
-        tk.Button(
+        ttk.Button(
             filter_frame,
-            text="RESET",
-            command=self.reset_filters,
-            bg="#4B5563",
-            fg="white",
-            relief="flat",
-            padx=12,
-            pady=7
-        ).grid(row=1, column=4, padx=5)
+            text="Reset",
+            command=self.reset_filters
+        ).pack(side="left", padx=5)
 
         # Monthly summary
         monthly_frame = tk.LabelFrame(
             self.root,
-            text="  MONTHLY SUMMARY  ",
-            font=("Arial", 10, "bold"),
-            bg="#1F2937",
-            fg="#38BDF8",
-            padx=12,
-            pady=10
-        )
-        monthly_frame.pack(fill="x", padx=25, pady=8)
-
-        self.month_income_label = self.create_month_card(
-            monthly_frame, "MONTHLY INCOME", "₹0", "#22C55E"
-        )
-
-        self.month_expense_label = self.create_month_card(
-            monthly_frame, "MONTHLY EXPENSE", "₹0", "#EF4444"
-        )
-
-        self.month_balance_label = self.create_month_card(
-            monthly_frame, "MONTHLY BALANCE", "₹0", "#38BDF8"
-        )
-
-        # Transaction table
-        table_frame = tk.Frame(self.root, bg="#111827")
-        table_frame.pack(
-            fill="both",
-            expand=True,
-            padx=25,
+            text="Monthly Summary",
+            padx=10,
             pady=8
         )
+        monthly_frame.pack(fill="x", padx=20, pady=5)
 
-        tk.Label(
-            table_frame,
-            text="TRANSACTIONS",
-            font=("Arial", 12, "bold"),
-            bg="#111827",
-            fg="white"
-        ).pack(anchor="w", pady=(0, 8))
+        self.month_income_label = tk.Label(
+            monthly_frame, text="Income: 0.00",
+            font=("Arial", 10, "bold")
+        )
+        self.month_income_label.pack(side="left", padx=20)
+
+        self.month_expense_label = tk.Label(
+            monthly_frame, text="Expense: 0.00",
+            font=("Arial", 10, "bold")
+        )
+        self.month_expense_label.pack(side="left", padx=20)
+
+        self.month_balance_label = tk.Label(
+            monthly_frame, text="Balance: 0.00",
+            font=("Arial", 10, "bold")
+        )
+        self.month_balance_label.pack(side="left", padx=20)
+
+        # Transactions table
+        table_frame = tk.LabelFrame(
+            self.root,
+            text="Transaction History",
+            padx=10,
+            pady=8
+        )
+        table_frame.pack(fill="both", expand=True, padx=20, pady=8)
 
         columns = (
-            "date", "type", "category",
-            "amount", "description"
+            "ID", "Date", "Type", "Category", "Amount", "Description"
         )
 
-        self.table = ttk.Treeview(
+        self.tree = ttk.Treeview(
             table_frame,
             columns=columns,
-            show="headings",
-            height=8
+            show="headings"
         )
 
-        headings = {
-            "date": "DATE",
-            "type": "TYPE",
-            "category": "CATEGORY",
-            "amount": "AMOUNT",
-            "description": "DESCRIPTION"
-        }
-
-        widths = {
-            "date": 130,
-            "type": 100,
-            "category": 140,
-            "amount": 130,
-            "description": 300
-        }
-
         for column in columns:
-            self.table.heading(
-                column,
-                text=headings[column]
-            )
-            self.table.column(
-                column,
-                width=widths[column],
-                anchor="center"
-            )
+            self.tree.heading(column, text=column)
+
+        self.tree.column("ID", width=45, anchor="center")
+        self.tree.column("Date", width=110, anchor="center")
+        self.tree.column("Type", width=90, anchor="center")
+        self.tree.column("Category", width=120, anchor="center")
+        self.tree.column("Amount", width=100, anchor="e")
+        self.tree.column("Description", width=250)
 
         scrollbar = ttk.Scrollbar(
             table_frame,
             orient="vertical",
-            command=self.table.yview
+            command=self.tree.yview
         )
+        self.tree.configure(yscrollcommand=scrollbar.set)
 
-        self.table.configure(
-            yscrollcommand=scrollbar.set
-        )
-
-        self.table.pack(side="left", fill="both", expand=True)
+        self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Table styling
-        style = ttk.Style()
-        style.theme_use("clam")
+        # Action buttons
+        action_frame = tk.Frame(self.root)
+        action_frame.pack(fill="x", padx=20, pady=10)
 
-        style.configure(
-            "Treeview",
-            background="#1F2937",
-            foreground="white",
-            fieldbackground="#1F2937",
-            rowheight=28,
-            font=("Arial", 10)
-        )
+        ttk.Button(
+            action_frame,
+            text="Delete Selected",
+            command=self.delete_transaction
+        ).pack(side="left", padx=5)
 
-        style.configure(
-            "Treeview.Heading",
-            background="#374151",
-            foreground="white",
-            font=("Arial", 10, "bold")
-        )
+        ttk.Button(
+            action_frame,
+            text="View Financial Charts",
+            command=self.show_charts
+        ).pack(side="left", padx=5)
 
-        style.map(
-            "Treeview",
-            background=[("selected", "#2563EB")]
-        )
-
-        # Delete button
-        tk.Button(
-            self.root,
-            text="DELETE SELECTED TRANSACTION",
-            command=self.delete_transaction,
-            bg="#DC2626",
-            fg="white",
-            activebackground="#B91C1C",
-            relief="flat",
-            font=("Arial", 9, "bold"),
-            padx=12,
-            pady=7
-        ).pack(anchor="e", padx=25, pady=5)
-
-        self.status_label = tk.Label(
-            self.root,
-            text="Ready | Database connected",
-            bg="#111827",
-            fg="#9CA3AF",
-            font=("Arial", 9)
-        )
-        self.status_label.pack(pady=5)
-
-    # ---------------- SUMMARY CARDS ----------------
-
-    def create_card(self, parent, title, value, color):
-        card = tk.Frame(
-            parent,
-            bg="#1F2937",
-            padx=20,
-            pady=12
-        )
-        card.pack(
-            side="left",
-            fill="x",
-            expand=True,
-            padx=7
-        )
-
-        tk.Label(
-            card,
-            text=title,
-            font=("Arial", 10, "bold"),
-            bg="#1F2937",
-            fg="#9CA3AF"
-        ).pack(anchor="w")
+    def create_card(self, parent, title, value):
+        card = tk.LabelFrame(parent, text=title, padx=15, pady=10)
+        card.pack(side="left", fill="both", expand=True, padx=8)
 
         label = tk.Label(
             card,
             text=value,
-            font=("Arial", 20, "bold"),
-            bg="#1F2937",
-            fg=color
+            font=("Arial", 17, "bold")
         )
-        label.pack(anchor="w", pady=4)
+        label.pack()
 
         return label
-
-    def create_month_card(self, parent, title, value, color):
-        card = tk.Frame(
-            parent,
-            bg="#273449",
-            padx=15,
-            pady=8
-        )
-        card.pack(
-            side="left",
-            fill="x",
-            expand=True,
-            padx=5
-        )
-
-        tk.Label(
-            card,
-            text=title,
-            font=("Arial", 9, "bold"),
-            bg="#273449",
-            fg="#9CA3AF"
-        ).pack(anchor="w")
-
-        label = tk.Label(
-            card,
-            text=value,
-            font=("Arial", 17, "bold"),
-            bg="#273449",
-            fg=color
-        )
-        label.pack(anchor="w", pady=3)
-
-        return label
-
-    # ---------------- DATABASE OPERATIONS ----------------
 
     def add_transaction(self):
         transaction_type = self.type_var.get()
-        category = self.category_var.get().strip()
-        amount_text = self.amount_var.get().strip()
-        transaction_date = self.date_var.get().strip()
-        description = self.note_var.get().strip()
-
-        if not amount_text or not category or not transaction_date:
-            messagebox.showwarning(
-                "Missing Information",
-                "Please fill in the amount, category and date."
-            )
-            return
+        category = self.category_var.get()
+        amount_text = self.amount_entry.get().strip()
+        date_text = self.date_entry.get().strip()
+        description = self.description_entry.get().strip()
 
         try:
             amount = float(amount_text)
-
             if amount <= 0:
                 raise ValueError
-
-            date.fromisoformat(transaction_date)
-
         except ValueError:
             messagebox.showerror(
-                "Invalid Input",
-                "Enter a valid positive amount and date (YYYY-MM-DD)."
+                "Invalid Amount",
+                "Please enter a valid amount greater than zero."
             )
             return
 
         try:
-            self.cursor.execute("""
-                INSERT INTO transactions
-                (date, type, category, amount, description)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                transaction_date,
-                transaction_type,
-                category,
-                amount,
-                description
-            ))
-
-            self.db_connection.commit()
-
-            self.amount_var.set("")
-            self.note_var.set("")
-
-            self.load_transactions()
-
-            self.status_label.config(
-                text="Transaction saved successfully!"
-            )
-
-        except sqlite3.Error as error:
+            datetime.strptime(date_text, "%Y-%m-%d")
+        except ValueError:
             messagebox.showerror(
-                "Database Error",
-                str(error)
+                "Invalid Date",
+                "Please enter the date in YYYY-MM-DD format."
             )
+            return
 
-    def load_transactions(self):
-        self.update_overall_summary()
-        self.apply_filters(show_message=False)
+        self.cursor.execute("""
+            INSERT INTO transactions
+            (date, type, category, amount, description)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            date_text,
+            transaction_type,
+            category,
+            amount,
+            description
+        ))
 
-    def update_overall_summary(self):
+        self.conn.commit()
+
+        self.amount_entry.delete(0, tk.END)
+        self.description_entry.delete(0, tk.END)
+
+        self.load_transactions()
+        self.update_summary()
+        self.update_monthly_summary()
+
+        messagebox.showinfo(
+            "Success",
+            "Transaction added successfully!"
+        )
+
+    def load_transactions(self, query=None, params=()):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        if query is None:
+            query = """
+                SELECT id, date, type, category, amount, description
+                FROM transactions
+                ORDER BY date DESC, id DESC
+            """
+
+        self.cursor.execute(query, params)
+
+        for row in self.cursor.fetchall():
+            self.tree.insert("", tk.END, values=row)
+
+    def update_summary(self):
         self.cursor.execute("""
             SELECT
-                COALESCE(SUM(
-                    CASE WHEN type = 'Income' THEN amount ELSE 0 END
-                ), 0),
-                COALESCE(SUM(
-                    CASE WHEN type = 'Expense' THEN amount ELSE 0 END
-                ), 0)
+                SUM(CASE WHEN type='Income' THEN amount ELSE 0 END),
+                SUM(CASE WHEN type='Expense' THEN amount ELSE 0 END)
             FROM transactions
         """)
 
-        total_income, total_expense = self.cursor.fetchone()
-        balance = total_income - total_expense
+        income, expense = self.cursor.fetchone()
+        income = income or 0
+        expense = expense or 0
+        balance = income - expense
 
-        self.income_label.config(
-            text=f"₹{total_income:,.2f}"
-        )
-        self.expense_label.config(
-            text=f"₹{total_expense:,.2f}"
-        )
-        self.balance_label.config(
-            text=f"₹{balance:,.2f}"
-        )
+        self.income_label.config(text=f"₹{income:,.2f}")
+        self.expense_label.config(text=f"₹{expense:,.2f}")
+        self.balance_label.config(text=f"₹{balance:,.2f}")
 
-    def update_monthly_summary(self, selected_month):
+    def update_monthly_summary(self):
+        month = datetime.today().strftime("%Y-%m")
+
         self.cursor.execute("""
             SELECT
-                COALESCE(SUM(
-                    CASE WHEN type = 'Income' THEN amount ELSE 0 END
-                ), 0),
-                COALESCE(SUM(
-                    CASE WHEN type = 'Expense' THEN amount ELSE 0 END
-                ), 0)
+                SUM(CASE WHEN type='Income' THEN amount ELSE 0 END),
+                SUM(CASE WHEN type='Expense' THEN amount ELSE 0 END)
             FROM transactions
             WHERE date LIKE ?
-        """, (selected_month + "%",))
+        """, (month + "%",))
 
-        monthly_income, monthly_expense = self.cursor.fetchone()
-        monthly_balance = monthly_income - monthly_expense
+        income, expense = self.cursor.fetchone()
+        income = income or 0
+        expense = expense or 0
 
         self.month_income_label.config(
-            text=f"₹{monthly_income:,.2f}"
+            text=f"Income: ₹{income:,.2f}"
         )
         self.month_expense_label.config(
-            text=f"₹{monthly_expense:,.2f}"
+            text=f"Expense: ₹{expense:,.2f}"
         )
         self.month_balance_label.config(
-            text=f"₹{monthly_balance:,.2f}"
+            text=f"Balance: ₹{income - expense:,.2f}"
         )
 
+    def apply_filters(self):
+        query = """
+            SELECT id, date, type, category, amount, description
+            FROM transactions
+            WHERE 1=1
+        """
+        params = []
+
+        category = self.filter_category.get()
+        transaction_type = self.filter_type.get()
+        month = self.month_filter.get().strip()
+
+        if category != "All":
+            query += " AND category = ?"
+            params.append(category)
+
+        if transaction_type != "All":
+            query += " AND type = ?"
+            params.append(transaction_type)
+
+        if month:
+            try:
+                datetime.strptime(month, "%Y-%m")
+            except ValueError:
+                messagebox.showerror(
+                    "Invalid Month",
+                    "Please use YYYY-MM format."
+                )
+                return
+
+            query += " AND date LIKE ?"
+            params.append(month + "%")
+
+        query += " ORDER BY date DESC, id DESC"
+
+        self.load_transactions(query, params)
+
+    def reset_filters(self):
+        self.filter_category.set("All")
+        self.filter_type.set("All")
+        self.month_filter.delete(0, tk.END)
+        self.load_transactions()
+
     def delete_transaction(self):
-        selected = self.table.selection()
+        selected = self.tree.selection()
 
         if not selected:
             messagebox.showwarning(
-                "Select Transaction",
+                "No Selection",
                 "Please select a transaction to delete."
             )
             return
@@ -604,110 +456,149 @@ class ExpenseTracker:
         if not confirm:
             return
 
-        try:
-            transaction_id = int(selected[0])
+        transaction_id = self.tree.item(
+            selected[0], "values"
+        )[0]
 
-            self.cursor.execute(
-                "DELETE FROM transactions WHERE id = ?",
-                (transaction_id,)
-            )
+        self.cursor.execute(
+            "DELETE FROM transactions WHERE id = ?",
+            (transaction_id,)
+        )
+        self.conn.commit()
 
-            self.db_connection.commit()
-            self.load_transactions()
+        self.load_transactions()
+        self.update_summary()
+        self.update_monthly_summary()
 
-            self.status_label.config(
-                text="Transaction deleted successfully!"
-            )
+        messagebox.showinfo(
+            "Deleted",
+            "Transaction deleted successfully."
+        )
 
-        except (sqlite3.Error, ValueError) as error:
-            messagebox.showerror(
-                "Delete Error",
-                str(error)
-            )
+    def get_monthly_expense_trend(self):
+        today = datetime.today()
+        months = []
 
-    # ---------------- FILTERS ----------------
+        for offset in range(5, -1, -1):
+            year = today.year
+            month = today.month - offset
 
-    def apply_filters(self, show_message=True):
-        selected_month = self.filter_month.get().strip()
+            while month <= 0:
+                month += 12
+                year -= 1
 
-        try:
-            datetime.strptime(selected_month, "%Y-%m")
-        except ValueError:
-            if show_message:
-                messagebox.showerror(
-                    "Invalid Month",
-                    "Please enter the month in YYYY-MM format.\nExample: 2026-11"
-                )
-            return
+            month_key = f"{year:04d}-{month:02d}"
+            month_label = calendar.month_abbr[month]
 
-        category = self.filter_category.get()
-        transaction_type = self.filter_type.get()
+            self.cursor.execute("""
+                SELECT COALESCE(SUM(amount), 0)
+                FROM transactions
+                WHERE type = 'Expense' AND date LIKE ?
+            """, (month_key + "%",))
 
-        query = """
-            SELECT id, date, type, category, amount, description
+            total = self.cursor.fetchone()[0]
+            months.append((month_label, total))
+
+        return months
+
+    def show_charts(self):
+        chart_window = tk.Toplevel(self.root)
+        chart_window.title("Financial Dashboard")
+        chart_window.geometry("1150x750")
+
+        heading = tk.Label(
+            chart_window,
+            text="FINANCIAL DASHBOARD",
+            font=("Arial", 18, "bold")
+        )
+        heading.pack(pady=10)
+
+        figure = Figure(figsize=(11, 6.5), dpi=100)
+
+        # Chart 1: Expense by category
+        ax1 = figure.add_subplot(221)
+
+        self.cursor.execute("""
+            SELECT category, SUM(amount)
             FROM transactions
-            WHERE date LIKE ?
-        """
+            WHERE type = 'Expense'
+            GROUP BY category
+        """)
 
-        parameters = [selected_month + "%"]
+        category_data = self.cursor.fetchall()
 
-        if category != "All":
-            query += " AND category = ?"
-            parameters.append(category)
+        if category_data:
+            labels = [row[0] for row in category_data]
+            values = [row[1] for row in category_data]
 
-        if transaction_type != "All":
-            query += " AND type = ?"
-            parameters.append(transaction_type)
-
-        query += " ORDER BY date DESC, id DESC"
-
-        try:
-            self.cursor.execute(query, parameters)
-            records = self.cursor.fetchall()
-
-            for item in self.table.get_children():
-                self.table.delete(item)
-
-            for record in records:
-                transaction_id, transaction_date, transaction_type, category, amount, description = record
-
-                self.table.insert(
-                    "",
-                    "end",
-                    iid=str(transaction_id),
-                    values=(
-                        transaction_date,
-                        transaction_type,
-                        category,
-                        f"₹{amount:,.2f}",
-                        description or ""
-                    )
-                )
-
-            # Monthly summary is independent of category/type filters.
-            self.update_monthly_summary(selected_month)
-
-            self.status_label.config(
-                text=f"Showing {len(records)} transactions for {selected_month}"
+            ax1.pie(
+                values,
+                labels=labels,
+                autopct="%1.1f%%",
+                startangle=90
             )
-
-        except sqlite3.Error as error:
-            messagebox.showerror(
-                "Filter Error",
-                str(error)
+            ax1.set_title("Expenses by Category")
+        else:
+            ax1.text(
+                0.5, 0.5, "No expense data available",
+                ha="center", va="center"
             )
+            ax1.set_title("Expenses by Category")
 
-    def reset_filters(self):
-        self.filter_category.set("All")
-        self.filter_type.set("All")
-        self.filter_month.set(date.today().strftime("%Y-%m"))
+        # Chart 2: Income vs Expense
+        ax2 = figure.add_subplot(222)
 
-        self.apply_filters()
+        self.cursor.execute("""
+            SELECT
+                SUM(CASE WHEN type='Income' THEN amount ELSE 0 END),
+                SUM(CASE WHEN type='Expense' THEN amount ELSE 0 END)
+            FROM transactions
+        """)
 
-    # ---------------- CLOSE APPLICATION ----------------
+        income, expense = self.cursor.fetchone()
+        income = income or 0
+        expense = expense or 0
+
+        ax2.bar(
+            ["Income", "Expense"],
+            [income, expense]
+        )
+        ax2.set_title("Overall Income vs Expense")
+        ax2.set_ylabel("Amount (₹)")
+
+        # Chart 3: Last six months expense trend
+        ax3 = figure.add_subplot(212)
+
+        trend = self.get_monthly_expense_trend()
+        month_labels = [item[0] for item in trend]
+        expense_values = [item[1] for item in trend]
+
+        ax3.plot(
+            month_labels,
+            expense_values,
+            marker="o"
+        )
+        ax3.set_title("Monthly Expense Trend - Last 6 Months")
+        ax3.set_xlabel("Month")
+        ax3.set_ylabel("Expense (₹)")
+        ax3.grid(True, alpha=0.3)
+
+        figure.tight_layout(pad=3)
+
+        canvas = FigureCanvasTkAgg(
+            figure,
+            master=chart_window
+        )
+        canvas.draw()
+        canvas.get_tk_widget().pack(
+            fill="both",
+            expand=True,
+            padx=10,
+            pady=10
+        )
 
     def close_app(self):
-        self.db_connection.close()
+        self.conn.close()
         self.root.destroy()
 
 
